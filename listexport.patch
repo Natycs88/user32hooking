@@ -1,0 +1,116 @@
+--- listexport_old.cpp	2009-02-15 16:41:24.000000000 +0900
++++ listexport_new.cpp	2010-06-13 19:16:58.062500000 +0900
+@@ -123,6 +123,7 @@
+ // printfに似た実装のメッセージボックス
+ DWORD PrintMsg(char *pszFormat, ...)
+ {
++#define MYDEBUG
+ #ifdef MYDEBUG
+    va_list argList;
+    va_start(argList, pszFormat);
+@@ -351,7 +352,7 @@
+         (offset + p_export_directory->AddressOfNameOrdinals - dir_left),
+         offset, p_export_directory->AddressOfNameOrdinals, dir_left);
+     
+-    for(DWORD i=0; i < MIN(name_num, func_num); i++){
++    for(DWORD i=0; i < /*MIN(*/name_num/*, func_num)*/; i++){
+         char *name = (char *)(p_export_data + p_export_names[i] - dir_left);
+         pp_list_name[p_export_name_ordinal[i]] = (char *)malloc(strlen(name) + 1);
+         if(pp_list_name[p_export_name_ordinal[i]] == NULL){
+@@ -361,14 +362,24 @@
+         strcpy(pp_list_name[p_export_name_ordinal[i]], name);
+     }
+ 
++	int NONAMECnt = 0;
++	for (int i=0; i<func_num; i++)
++	{
++		if(pp_list_name[i]==NULL)
++		{
++			pp_list_name[i] = (char*)malloc(50);
++			sprintf(pp_list_name[i], "NONAME%u", ++NONAMECnt);
++		}
++	}
++
+     // ##########################################
+     // データ出力部分
+     // ##########################################
+ 
+     // エクスポートデータを表示（出力）
+     if(option_flag == 0){
+-        for(DWORD i=0; i < MIN(name_num, func_num); i++)
+-            printf("序数: %04X    名前: %s\n", p_list_ordinal[i], pp_list_name[i]);
++        for(DWORD i=0; i < /*MIN(name_num,*/ func_num/*)*/; i++)
++			printf("序数: %04X    名前: %s\n", p_list_ordinal[i], pp_list_name[i]);
+     }
+ 
+     // エクスポートデータを元にDLLソース生成
+@@ -393,12 +404,14 @@
+         // include <windows.h>
+         fprintf(outfp, "#include <windows.h>\n");
+         // FARPROC p_function
+-        for(DWORD i=0; i < MIN(name_num, func_num); i++)
++        for(DWORD i=0; i < /*MIN(name_num,*/ func_num/*)*/; i++)
++		{
+             fprintf(outfp, "FARPROC p_%s;\n", pp_list_name[i]);
++		}
+ 		// extern "C"
+ 		fprintf(outfp, "extern \"C\" {\n");
+         // __declspec( naked ) void d_function() { _asm{ jmp p_function } }
+-        for(DWORD i=0; i < MIN(name_num, func_num); i++){
++        for(DWORD i=0; i < /*MIN(name_num,*/ func_num/*)*/; i++){
+             fprintf(outfp, 
+                 "__declspec( naked ) void WINAPI d_%s() { _asm{ jmp p_%s } }\n", 
+                 pp_list_name[i], pp_list_name[i]);
+@@ -418,10 +431,17 @@
+             "        if(h_original == NULL)\n"
+             "            return FALSE;\n", file_name);
+         // p_function = GetProcAddress(h_original, "function");
+-        for(DWORD i=0; i < MIN(name_num, func_num); i++){
+-            fprintf(outfp, "        "
+-                "p_%s = GetProcAddress(h_original, \"%s\");\n", 
+-                pp_list_name[i], pp_list_name[i]);
++        for(DWORD i=0; i < /*MIN(name_num,*/ func_num/*)*/; i++){
++			if(strncmp(pp_list_name[i], "NONAME", 6)==0)
++			{
++	            fprintf(outfp, "        "
++	                "p_%s = GetProcAddress(h_original, MAKEINTRESOURCE(%u));\n", 
++	                pp_list_name[i], i+p_export_directory->Base);
++			} else {
++	            fprintf(outfp, "        "
++	                "p_%s = GetProcAddress(h_original, \"%s\");\n", 
++	                pp_list_name[i], pp_list_name[i]);
++			}
+         }
+         fprintf(outfp,
+             "        break;\n"
+@@ -450,11 +470,11 @@
+         // project_nameから".def"を排除
+         project_name[strlen(project_name) - strlen(".def")] = '\0';
+         // LIBRARY DLLfile...
+-        fprintf(outfp, "LIBRARY %s\n", project_name);
++        fprintf(outfp, "LIBRARY %s ;BASE=%u\n", project_name, p_export_directory->Base);
+         fprintf(outfp, "EXPORTS\n");
+         // function=d_function @ 1
+-        for(DWORD i=0; i < MIN(name_num, func_num); i++)
+-            fprintf(outfp, "    %s=d_%s @ %d\n", pp_list_name[i], pp_list_name[i], i + 1);
++        for(DWORD i=0; i < /*MIN(name_num,*/ func_num/*)*/; i++)
++			fprintf(outfp, "    %s=d_%s @ %d %s\n", pp_list_name[i], pp_list_name[i], i+p_export_directory->Base/* + 1*/, strncmp(pp_list_name[i], "NONAME", 6)==0?"NONAME":"");
+         fclose(outfp);
+ 
+         printf("ソースファイル %s.cpp, %s.def を生成しました\n", 
+@@ -462,13 +482,13 @@
+     }
+ 
+     // 確保した関数名用のメモリを解放
+-    for(DWORD i=0; i < name_num; i++){
++    for(DWORD i=0; i < func_num/*name_num*/; i++){
+         if(pp_list_name[i])
+             free(pp_list_name[i]);
+     }
+ 
+     // メモリの開放
+-    free(pp_list_name);
++    //free(pp_list_name);
+     free(p_list_ordinal);
+     free(p_section_header);
+     free(p_export_data);
